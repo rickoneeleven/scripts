@@ -1,0 +1,3 @@
+set this policy to DISABLED
+
+https://support.microsoft.com/en-gb/help/2895815/logon-scripts-do-not-run-for-five-minutes-after-a-user-logs-on-to-a-wi

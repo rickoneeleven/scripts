@@ -1,0 +1,1 @@
+Powershell.exe -executionpolicy remotesigned -File  "C:\111\OneDrive\linux n scripts\scripts\windows\blue-toggle.ps1"

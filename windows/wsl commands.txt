@@ -1,0 +1,4 @@
+wslconfig /list /all
+
+#power off
+wslconfig /t Debian

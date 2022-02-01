@@ -1,0 +1,56 @@
+root = /home/rick111
+root = ssh://rick111@novascore.io:11/
+perms=0o0000
+
+follow = Regex .*
+prefer=newer
+
+#http://ubuntuforums.org/showthread.php?t=1848271
+# Set ignore for . hidden files/directories and temp files
+ignore      = Name *.tmp
+ignore      = Path .*
+ignore      = Path temp
+ignore      = Path tmp
+
+#only copy profile files from unison directory
+ignore      = Path .unison/*
+#rule below this does not work, there just to show you I TRIED GOD DAMN IT
+ignore      = Path .unison.*.*.unison.tmp
+ignore      = Name *.tmp
+ignorenot   = Path .unison
+ignorenot   = Path .unison/*.prf
+
+#ignores other than hidden files
+ignore      = Name Desktop
+ignore      = Name VirtualBox VMs
+ignore      = Name mbox
+ignore      = Name Mail
+ignore      = Name Maildir
+ignore      = Name purge.lock
+ignore      = Path Downloads
+ignore      = Path Steam
+ignore      = Path easyremote_backup
+ignore      = Path home_folder_backup
+ignore      = Path nobackup
+ignore      = Path unison.log
+
+#don't ignore these folders
+ignorenot   = Path .fzf
+ignorenot   = Path .mutt
+ignorenot   = Path .vim
+
+#bit of jazz hands to make sure i get terminator config but not all the other shite
+ignore      = Path .config/*
+ignorenot   = Path .config
+ignorenot   = Path .config/terminator
+ignorenot   = Path .config/tox
+
+#don't ignore these files
+ignorenot   = Path .bashrc
+ignorenot   = Path .bash_aliases
+ignorenot   = Path .inputrc
+ignorenot   = Path .muttrc
+ignorenot   = Path .vimrc
+ignorenot   = Path .xbindkeysrc
+ignorenot   = Path .fzf.bash
+ignorenot   = Path .mailcap
