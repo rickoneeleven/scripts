@@ -1,1 +1,0 @@
-Run, "C:\111\OneDrive\linux n scripts\scripts\windows\blue-toggle.bat", , Hide

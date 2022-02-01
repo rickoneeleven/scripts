@@ -1,0 +1,1 @@
+Powershell.exe -executionpolicy remotesigned -File  "C:\Users\Ryan Partington\Documents\GitHub\scripts\ahk\blue-toggle\blue-toggle.ps1"
