@@ -1,0 +1,1 @@
+Run, "C:\Users\Ryan Partington\Documents\GitHub\scripts\ahk\blue-toggle\blue-toggle.bat", , Hide
