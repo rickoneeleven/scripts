@@ -1,4 +1,4 @@
-openssl enc -d "-aes-256-cbc" -in 'backupfile_name' -out backup.tgz -pass pass:'<backup_encrypt_password>' -md md5
+openssl enc -d "-aes-256-cbc" -in '<backupfile_name>' -out backup.tgz -pass pass:'<backup_encrypt_password>' -md md5
 mkdir gubbins
 tar -xzf backup.tgz -C gubbins/
 cat gubbins/conf/backupdata/device.backup/fwversion
