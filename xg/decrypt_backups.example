@@ -1,5 +1,5 @@
-root@li1087-10:/home/pinescore/public_html/111/ftp_speedtest# openssl enc -d "-aes-256-cbc" -in 'backupfile_name' -out backup.tgz -pass pass:'<backup_encrypt_password>' -md md5
-root@li1087-10:/home/pinescore/public_html/111/ftp_speedtest# mkdir gubbins
-root@li1087-10:/home/pinescore/public_html/111/ftp_speedtest# tar -xzf backup.tgz -C gubbins/
-root@li1087-10:/home/pinescore/public_html/111/ftp_speedtest# cat gubbins/conf/backupdata/device.backup/fwversion
+openssl enc -d "-aes-256-cbc" -in 'backupfile_name' -out backup.tgz -pass pass:'<backup_encrypt_password>' -md md5
+mkdir gubbins
+tar -xzf backup.tgz -C gubbins/
+cat gubbins/conf/backupdata/device.backup/fwversion
 XG430_WP02_18.0.6.655
