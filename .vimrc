@@ -1,2 +1,4 @@
-source /usr/share/vim/vim81/defaults.vim
-set mouse-=a
+set mouse=r
+syntax on
+colorscheme desert
+highlight Comment ctermfg=green
