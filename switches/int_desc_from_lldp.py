@@ -53,7 +53,8 @@ def generate_description_commands(parsed_info):
         commands.append(f"description {info['system_name']}")
         commands.append("exit")
     commands.append("end")
-    commands.append("write memory")
+    commands.append("write")
+    commands.append("y")
     return commands
 
 def apply_changes(channel, commands):
@@ -62,6 +63,8 @@ def apply_changes(channel, commands):
         for command in commands:
             execute_command(channel, command)
         print("All commands executed.")
+        print("Waiting 10 seconds for any tasks to complete...")
+        time.sleep(111)
         return True
     except Exception as e:
         print(f"Failed to apply changes: {str(e)}")
@@ -90,10 +93,8 @@ def main(username, password, switch_ip):
         user_input = input("\nWould you like me to apply these changes? y/n (default n): ").strip().lower()
         
         if user_input == 'y':
-            if apply_changes(channel, commands):
-                print("Changes were applied successfully.")
-            else:
-                print("Failed to apply all changes. Please check the switch configuration manually.")
+            apply_changes(channel, commands)
+            print("Please check the switch configuration to confirm the changes.")
         else:
             print("Changes were not applied.")
 
