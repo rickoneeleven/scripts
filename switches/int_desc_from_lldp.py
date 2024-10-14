@@ -59,7 +59,7 @@ def apply_changes(channel, commands):
     print()
     print()
     print()
-    print("Process complete, we've deliberately not written changes to startup-config as another safety procedure")
+    print("Process complete, we've deliberately not written changes to startup-config as another saftey proceedure")
     time.sleep(2)
 
 def main(username, password, switch_ip):
