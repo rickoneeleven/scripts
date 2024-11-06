@@ -3,6 +3,9 @@ import time
 import re
 import sys
 
+# List of system names to skip when updating descriptions
+SKIP_DESCRIPTIONS = ["(none)", ]  # Add more with commas, e.g. ["(none)", "unknown", "test"]
+
 def connect_to_switch(switch_ip, username, password, timeout=2):
     print(f"Attempting to connect to {switch_ip}...")
     ssh = paramiko.SSHClient()
@@ -34,15 +37,24 @@ def get_lldp_info(channel):
 def parse_lldp_info(lldp_output):
     lines = lldp_output.split('\n')
     parsed_info = []
+    skipped_interfaces = []
+    
     for line in lines:
         if line.strip():
             parts = re.split(r'\s+', line.strip())
             if len(parts) >= 5 and parts[0].startswith(('Gi', 'Te')):
+                system_name = ' '.join(parts[4:])
+                if system_name in SKIP_DESCRIPTIONS:
+                    skipped_interfaces.append({
+                        'interface': parts[0],
+                        'system_name': system_name
+                    })
+                    continue
                 parsed_info.append({
                     'interface': parts[0],
-                    'system_name': ' '.join(parts[4:])
+                    'system_name': system_name
                 })
-    return parsed_info
+    return parsed_info, skipped_interfaces
 
 def generate_description_commands(parsed_info):
     commands = ["conf"]
@@ -53,13 +65,21 @@ def generate_description_commands(parsed_info):
     commands.append("end")
     return commands
 
+def countdown_timer(seconds):
+    print("\nReviewing changes before application...")
+    for i in range(seconds, 0, -1):
+        sys.stdout.write(f"\rProceeding with changes in {i} seconds... Press Ctrl+C to abort")
+        sys.stdout.flush()
+        time.sleep(1)
+    print("\nApplying changes...")
+
 def apply_changes(channel, commands):
     for command in commands:
         execute_command(channel, command)
     print()
     print()
     print()
-    print("Process complete, we've deliberately not written changes to startup-config as another saftey proceedure")
+    print("Process complete, we've deliberately not written changes to startup-config as another safety procedure")
     time.sleep(2)
 
 def main(username, password, switch_ip):
@@ -72,25 +92,28 @@ def main(username, password, switch_ip):
             print("No LLDP information retrieved. Exiting.")
             return
 
-        parsed_info = parse_lldp_info(lldp_output)
+        parsed_info, skipped_interfaces = parse_lldp_info(lldp_output)
 
-        print("\nParsed LLDP Info:")
+        if skipped_interfaces:
+            print("\nSkipped Interfaces (matched skip list):")
+            for info in skipped_interfaces:
+                print(f"Interface: {info['interface']}, System Name: {info['system_name']}")
+
+        print("\nParsed LLDP Info (will be updated):")
         for info in parsed_info:
             print(f"Interface: {info['interface']}, System Name: {info['system_name']}")
 
         commands = generate_description_commands(parsed_info)
         
-        print("\nCommands to update interface descriptions:")
+        print("\nCommands to be applied:")
         for command in commands:
             print(command)
 
-        user_input = input("\nWould you like to apply these changes? y/n (default n): ").strip().lower()
-        
-        if user_input == 'y':
-            apply_changes(channel, commands)
-        else:
-            print("Changes were not applied.")
+        countdown_timer(10)
+        apply_changes(channel, commands)
 
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user.")
     except Exception as e:
         print(f"An unexpected error occurred: {str(e)}")
     finally:
