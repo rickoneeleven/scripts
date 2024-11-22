@@ -56,9 +56,8 @@ def get_node_id(node_name):
 
 def process_node(node_id):
     """Process interfaces for a specific node"""
-    # Query includes Unplugged field to check current state
     query = f"""
-        SELECT InterfaceID, Caption, Status, InterfaceAlias, Unplugged 
+        SELECT InterfaceID, Caption, Status, InterfaceAlias 
         FROM Orion.NPM.Interfaces 
         WHERE NodeID={node_id}
     """
@@ -73,9 +72,9 @@ def process_node(node_id):
             int_id = interface['InterfaceID']
             uri = f"swis://SOLARWINDS_SERVER_IP:17778/Orion/Orion.Nodes/NodeID={node_id}/Interfaces/InterfaceID={int_id}"
             
-            # Set Unplugged=1 instead of Status=10
-            swis.update(uri, Unplugged=1)
-            print(f"📡 Marking interface {int_caption} as unplugged")
+            # Set Unplugable=1 instead of Unplugged=1
+            swis.update(uri, Unpluggable=1)
+            print(f"📡 Marking interface {int_caption} as unpluggable")
 
 
 def list_nodes(pattern=None):
