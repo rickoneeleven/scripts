@@ -2,6 +2,7 @@ import paramiko
 import time
 import re
 import sys
+import argparse
 from abc import ABC, abstractmethod
 from typing import List, Tuple, Dict
 
@@ -173,58 +174,85 @@ def apply_changes(adapter, commands):
     print("\n\n\nProcess complete, we've deliberately not written changes to startup-config as another safety procedure")
     time.sleep(2)
 
-def main(username, password, switch_ip, switch_type="dellv6"):
-    print("Script started.")
-    ssh, channel = connect_to_switch(switch_ip, username, password)
+def parse_arguments():
+    parser = argparse.ArgumentParser(description='Update switch interface descriptions based on LLDP information.')
+    parser.add_argument('--username', required=True,
+                      help='Username for switch authentication')
+    parser.add_argument('--password', required=True,
+                      help='Password for switch authentication')
+    parser.add_argument('--node', required=True,
+                      help='Switch hostname or IP address')
+    parser.add_argument('--switch-type', required=True,
+                      help='Type of switch (e.g., dellv6)')
+    parser.add_argument('--cron', action='store_true', default=False,
+                      help='Run in cron mode (minimal output)')
+    
+    return parser.parse_args()
+
+def main():
+    args = parse_arguments()
+    
+    if not args.cron:
+        print("Script started.")
+    
+    ssh, channel = connect_to_switch(args.node, args.username, args.password)
     
     try:
-        adapter = create_adapter(switch_type, channel)
+        adapter = create_adapter(args.switch_type, channel)
         adapter.set_terminal_length()
         
         lldp_output = adapter.get_lldp_info()
         if not lldp_output.strip():
-            print("No LLDP information retrieved. Exiting.")
+            if not args.cron:
+                print("No LLDP information retrieved. Exiting.")
             return
 
         parsed_info, skipped_interfaces = adapter.parse_lldp_info(lldp_output)
 
-        if skipped_interfaces:
+        if skipped_interfaces and not args.cron:
             print("\nSkipped Interfaces (matched skip list):")
             for info in skipped_interfaces:
                 print(f"Interface: {info['interface']}, System Name: {info['system_name']}")
 
-        print("\nParsed LLDP Info:")
-        for info in parsed_info:
-            print(f"Interface: {info['interface']}, System Name: {info['system_name']}")
+        if not args.cron:
+            print("\nParsed LLDP Info:")
+            for info in parsed_info:
+                print(f"Interface: {info['interface']}, System Name: {info['system_name']}")
 
         commands, updates_needed = generate_description_commands(adapter, parsed_info)
         
         if not updates_needed:
-            print("\nNo description updates needed. All interfaces are already properly configured.")
+            if not args.cron:
+                print("\nNo description updates needed. All interfaces are already properly configured.")
             return
             
-        print("\nCommands to be applied:")
-        for command in commands:
-            print(command)
+        # Always print changes, even in cron mode
+        print(f"\nChanges detected on {args.node}:")
+        for info in parsed_info:
+            current_description = adapter.get_interface_description(info['interface'])
+            new_description = info['system_name']
+            if current_description != new_description:
+                print(f"Interface {info['interface']}:")
+                print(f"  Old description: '{current_description}'")
+                print(f"  New description: '{new_description}'")
 
-        countdown_timer(10)
+        if not args.cron:
+            print("\nCommands to be applied:")
+            for command in commands:
+                print(command)
+            countdown_timer(10)
+        
         apply_changes(adapter, commands)
 
     except KeyboardInterrupt:
-        print("\nOperation cancelled by user.")
+        if not args.cron:
+            print("\nOperation cancelled by user.")
     except Exception as e:
-        print(f"An unexpected error occurred: {str(e)}")
+        print(f"An error occurred on {args.node}: {str(e)}")
     finally:
-        print("Closing SSH connection...")
+        if not args.cron:
+            print("Closing SSH connection...")
         ssh.close()
 
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
-        print("Usage: python3 script.py <username> <password> <switch_ip>")
-        sys.exit(1)
-    
-    username = sys.argv[1]
-    password = sys.argv[2]
-    switch_ip = sys.argv[3]
-    
-    main(username, password, switch_ip)
+    main()
