@@ -124,42 +124,47 @@ def create_adapter(switch_type: str, channel) -> SwitchAdapter:
         
     return adapter_class(channel)
 
-def connect_to_switch(switch_ip, username, password, timeout=2):
-    print(f"Attempting to connect to {switch_ip}...")
+def connect_to_switch(switch_ip, username, password, timeout=2, cron_mode=False):
+    if not cron_mode:
+        print(f"Attempting to connect to {switch_ip}...")
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     try:
         ssh.connect(switch_ip, username=username, password=password, timeout=timeout)
-        print("Successfully connected to the switch.")
+        if not cron_mode:
+            print("Successfully connected to the switch.")
         channel = ssh.invoke_shell()
         return ssh, channel
     except Exception as e:
         print(f"Failed to connect to the switch: {str(e)}")
         sys.exit(1)
 
-def generate_description_commands(adapter, parsed_info):
+def generate_description_commands(adapter, parsed_info, cron_mode=False):
     commands = adapter.enter_config_mode()
     updates_needed = False
     
-    print("\nChecking current interface descriptions...")
+    if not cron_mode:
+        print("\nChecking current interface descriptions...")
     for info in parsed_info:
         current_description = adapter.get_interface_description(info['interface'])
         new_description = info['system_name']
         
-        print(f"\nChecking {info['interface']}:")
-        print(f"  Current description: '{current_description}'")
-        print(f"  Proposed description: '{new_description}'")
+        if not cron_mode:
+            print(f"\nChecking {info['interface']}:")
+            print(f"  Current description: '{current_description}'")
+            print(f"  Proposed description: '{new_description}'")
         
         if current_description != new_description:
             commands.extend(adapter.generate_interface_commands(info['interface'], new_description))
             updates_needed = True
-            print("  -> Update needed")
-        else:
+            if not cron_mode:
+                print("  -> Update needed")
+        elif not cron_mode:
             print("  -> No update needed (descriptions match)")
     
     commands.append("end")
     return commands, updates_needed
-
+    
 def countdown_timer(seconds):
     print("\nReviewing changes before application...")
     for i in range(seconds, 0, -1):
@@ -195,7 +200,7 @@ def main():
     if not args.cron:
         print("Script started.")
     
-    ssh, channel = connect_to_switch(args.node, args.username, args.password)
+    ssh, channel = connect_to_switch(args.node, args.username, args.password, cron_mode=args.cron)
     
     try:
         adapter = create_adapter(args.switch_type, channel)
@@ -219,22 +224,23 @@ def main():
             for info in parsed_info:
                 print(f"Interface: {info['interface']}, System Name: {info['system_name']}")
 
-        commands, updates_needed = generate_description_commands(adapter, parsed_info)
+        commands, updates_needed = generate_description_commands(adapter, parsed_info, args.cron)
         
         if not updates_needed:
             if not args.cron:
                 print("\nNo description updates needed. All interfaces are already properly configured.")
             return
             
-        # Always print changes, even in cron mode
-        print(f"\nChanges detected on {args.node}:")
-        for info in parsed_info:
-            current_description = adapter.get_interface_description(info['interface'])
-            new_description = info['system_name']
-            if current_description != new_description:
-                print(f"Interface {info['interface']}:")
-                print(f"  Old description: '{current_description}'")
-                print(f"  New description: '{new_description}'")
+        # Only print changes when there are actual updates
+        if updates_needed:
+            print(f"\nChanges detected on {args.node}:")
+            for info in parsed_info:
+                current_description = adapter.get_interface_description(info['interface'])
+                new_description = info['system_name']
+                if current_description != new_description:
+                    print(f"Interface {info['interface']}:")
+                    print(f"  Old description: '{current_description}'")
+                    print(f"  New description: '{new_description}'")
 
         if not args.cron:
             print("\nCommands to be applied:")
