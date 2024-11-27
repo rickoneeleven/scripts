@@ -142,6 +142,7 @@ def connect_to_switch(switch_ip, username, password, timeout=2, cron_mode=False)
 def generate_description_commands(adapter, parsed_info, cron_mode=False):
     commands = adapter.enter_config_mode()
     updates_needed = False
+    actual_changes = []  # New list to track real changes
     
     if not cron_mode:
         print("\nChecking current interface descriptions...")
@@ -157,13 +158,18 @@ def generate_description_commands(adapter, parsed_info, cron_mode=False):
         if current_description != new_description:
             commands.extend(adapter.generate_interface_commands(info['interface'], new_description))
             updates_needed = True
+            actual_changes.append({
+                'interface': info['interface'],
+                'old_description': current_description,
+                'new_description': new_description
+            })
             if not cron_mode:
                 print("  -> Update needed")
         elif not cron_mode:
             print("  -> No update needed (descriptions match)")
     
     commands.append("end")
-    return commands, updates_needed
+    return commands, updates_needed, actual_changes  # Return the actual changes
     
 def countdown_timer(seconds):
     print("\nReviewing changes before application...")
@@ -224,7 +230,7 @@ def main():
             for info in parsed_info:
                 print(f"Interface: {info['interface']}, System Name: {info['system_name']}")
 
-        commands, updates_needed = generate_description_commands(adapter, parsed_info, args.cron)
+        commands, updates_needed, actual_changes = generate_description_commands(adapter, parsed_info, args.cron)
         
         if not updates_needed:
             if not args.cron:
@@ -234,13 +240,10 @@ def main():
         # Only print changes when there are actual updates
         if updates_needed:
             print(f"\nChanges detected on {args.node}:")
-            for info in parsed_info:
-                current_description = adapter.get_interface_description(info['interface'])
-                new_description = info['system_name']
-                if current_description != new_description:
-                    print(f"Interface {info['interface']}:")
-                    print(f"  Old description: '{current_description}'")
-                    print(f"  New description: '{new_description}'")
+            for change in actual_changes:  # Use the actual_changes list instead
+                print(f"Interface {change['interface']}:")
+                print(f"  Old description: '{change['old_description']}'")
+                print(f"  New description: '{change['new_description']}'")
 
         if not args.cron:
             print("\nCommands to be applied:")
