@@ -140,6 +140,112 @@ def connect_to_switch(switch_ip, username, password, timeout=2, cron_mode=False)
         sys.exit(1)
 
 def generate_description_commands(adapter, parsed_info, cron_mode=False):
+    """
+    Enhanced version with robust comparison logic and validation checks
+    """
+    commands = adapter.enter_config_mode()
+    updates_needed = False
+    actual_changes = []
+    
+    # First, build a complete map of current descriptions
+    interface_descriptions = {}
+    validation_errors = []
+    
+    if not cron_mode:
+        print("\nBuilding current interface description map...")
+        
+    for info in parsed_info:
+        interface = info['interface']
+        # Validate interface format
+        if not re.match(r'^(Gi|Te)\d+/\d+/\d+$', interface):
+            validation_errors.append(f"Invalid interface format: {interface}")
+            continue
+            
+        # Get current description with retry logic
+        retry_count = 3
+        current_description = None
+        
+        for attempt in range(retry_count):
+            try:
+                # Clear any potential buffer before each attempt
+                adapter.clear_buffer()
+                current_description = adapter.get_interface_description(interface)
+                
+                # Validate the retrieved description
+                if current_description is not None:
+                    interface_descriptions[interface] = current_description
+                    break
+                    
+                if attempt < retry_count - 1:
+                    time.sleep(1)  # Wait before retry
+            except Exception as e:
+                if attempt == retry_count - 1:
+                    validation_errors.append(f"Failed to get description for {interface}: {str(e)}")
+                time.sleep(1)  # Wait before retry
+    
+    # Report any validation errors
+    if validation_errors and not cron_mode:
+        print("\nValidation Errors:")
+        for error in validation_errors:
+            print(f"  - {error}")
+    
+    # Now compare descriptions with additional validation
+    if not cron_mode:
+        print("\nComparing interface descriptions...")
+        
+    for info in parsed_info:
+        interface = info['interface']
+        new_description = info['system_name']
+        
+        # Skip if we couldn't get the current description
+        if interface not in interface_descriptions:
+            if not cron_mode:
+                print(f"\nSkipping {interface}: Could not retrieve current description")
+            continue
+            
+        current_description = interface_descriptions[interface]
+        
+        # Additional validation checks
+        if not new_description or new_description.isspace():
+            if not cron_mode:
+                print(f"\nSkipping {interface}: New description is empty")
+            continue
+            
+        # Log comparison details in non-cron mode
+        if not cron_mode:
+            print(f"\nComparing {interface}:")
+            print(f"  Current description: '{current_description}'")
+            print(f"  Proposed description: '{new_description}'")
+            print(f"  Current type: {type(current_description).__name__}")
+            print(f"  Proposed type: {type(new_description).__name__}")
+        
+        # Normalize strings for comparison
+        current_normalized = current_description.strip() if current_description else ""
+        new_normalized = new_description.strip()
+        
+        # Double-check the interface matches before generating commands
+        if current_normalized != new_normalized:
+            # Verify interface exists in both datasets
+            verification_desc = adapter.get_interface_description(interface)
+            if verification_desc != current_description:
+                if not cron_mode:
+                    print(f"  -> Verification failed: description changed during processing")
+                continue
+                
+            commands.extend(adapter.generate_interface_commands(interface, new_normalized))
+            updates_needed = True
+            actual_changes.append({
+                'interface': interface,
+                'old_description': current_normalized,
+                'new_description': new_normalized
+            })
+            if not cron_mode:
+                print("  -> Update needed")
+        elif not cron_mode:
+            print("  -> No update needed (descriptions match)")
+    
+    commands.append("end")
+    return commands, updates_needed, actual_changes
     commands = adapter.enter_config_mode()
     updates_needed = False
     actual_changes = []  # New list to track real changes
