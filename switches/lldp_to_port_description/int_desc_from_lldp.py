@@ -5,6 +5,7 @@ import sys
 import argparse
 from abc import ABC, abstractmethod
 from typing import List, Tuple, Dict
+from collections import defaultdict
 
 class SwitchAdapter(ABC):
     def __init__(self, channel):
@@ -61,6 +62,7 @@ class SwitchAdapter(ABC):
 
 class DellV6Adapter(SwitchAdapter):
     SKIP_DESCRIPTIONS = ["(none)"]
+    MULTIPLE_DEVICES_DESC = "multiple devices on lldp"
     
     def set_terminal_length(self) -> str:
         return self.execute_command("terminal length 0", wait_time=2)
@@ -70,24 +72,33 @@ class DellV6Adapter(SwitchAdapter):
     
     def parse_lldp_info(self, lldp_output: str) -> Tuple[List[Dict], List[Dict]]:
         lines = lldp_output.split('\n')
-        parsed_info = []
+        interface_devices = defaultdict(list)
         skipped_interfaces = []
+        parsed_info = []
         
+        # First pass: collect all devices per interface
         for line in lines:
             if line.strip():
                 parts = re.split(r'\s+', line.strip())
                 if len(parts) >= 5 and parts[0].startswith(('Gi', 'Te')):
+                    interface = parts[0]
                     system_name = ' '.join(parts[4:])
-                    if system_name in self.SKIP_DESCRIPTIONS:
-                        skipped_interfaces.append({
-                            'interface': parts[0],
-                            'system_name': system_name
-                        })
-                        continue
-                    parsed_info.append({
-                        'interface': parts[0],
-                        'system_name': system_name
-                    })
+                    if system_name not in self.SKIP_DESCRIPTIONS:
+                        interface_devices[interface].append(system_name)
+        
+        # Second pass: create final parsed info
+        for interface, devices in interface_devices.items():
+            if len(devices) > 1:
+                parsed_info.append({
+                    'interface': interface,
+                    'system_name': self.MULTIPLE_DEVICES_DESC
+                })
+            else:
+                parsed_info.append({
+                    'interface': interface,
+                    'system_name': devices[0]
+                })
+                
         return parsed_info, skipped_interfaces
     
     def get_interface_description(self, interface: str) -> str:
@@ -140,14 +151,10 @@ def connect_to_switch(switch_ip, username, password, timeout=2, cron_mode=False)
         sys.exit(1)
 
 def generate_description_commands(adapter, parsed_info, cron_mode=False):
-    """
-    Enhanced version with robust comparison logic and validation checks
-    """
     commands = adapter.enter_config_mode()
     updates_needed = False
     actual_changes = []
     
-    # First, build a complete map of current descriptions
     interface_descriptions = {}
     validation_errors = []
     
@@ -156,40 +163,34 @@ def generate_description_commands(adapter, parsed_info, cron_mode=False):
         
     for info in parsed_info:
         interface = info['interface']
-        # Validate interface format
         if not re.match(r'^(Gi|Te)\d+/\d+/\d+$', interface):
             validation_errors.append(f"Invalid interface format: {interface}")
             continue
             
-        # Get current description with retry logic
         retry_count = 3
         current_description = None
         
         for attempt in range(retry_count):
             try:
-                # Clear any potential buffer before each attempt
                 adapter.clear_buffer()
                 current_description = adapter.get_interface_description(interface)
                 
-                # Validate the retrieved description
                 if current_description is not None:
                     interface_descriptions[interface] = current_description
                     break
                     
                 if attempt < retry_count - 1:
-                    time.sleep(1)  # Wait before retry
+                    time.sleep(1)
             except Exception as e:
                 if attempt == retry_count - 1:
                     validation_errors.append(f"Failed to get description for {interface}: {str(e)}")
-                time.sleep(1)  # Wait before retry
+                time.sleep(1)
     
-    # Report any validation errors
     if validation_errors and not cron_mode:
         print("\nValidation Errors:")
         for error in validation_errors:
             print(f"  - {error}")
     
-    # Now compare descriptions with additional validation
     if not cron_mode:
         print("\nComparing interface descriptions...")
         
@@ -197,7 +198,6 @@ def generate_description_commands(adapter, parsed_info, cron_mode=False):
         interface = info['interface']
         new_description = info['system_name']
         
-        # Skip if we couldn't get the current description
         if interface not in interface_descriptions:
             if not cron_mode:
                 print(f"\nSkipping {interface}: Could not retrieve current description")
@@ -205,13 +205,11 @@ def generate_description_commands(adapter, parsed_info, cron_mode=False):
             
         current_description = interface_descriptions[interface]
         
-        # Additional validation checks
         if not new_description or new_description.isspace():
             if not cron_mode:
                 print(f"\nSkipping {interface}: New description is empty")
             continue
             
-        # Log comparison details in non-cron mode
         if not cron_mode:
             print(f"\nComparing {interface}:")
             print(f"  Current description: '{current_description}'")
@@ -219,13 +217,18 @@ def generate_description_commands(adapter, parsed_info, cron_mode=False):
             print(f"  Current type: {type(current_description).__name__}")
             print(f"  Proposed type: {type(new_description).__name__}")
         
-        # Normalize strings for comparison
         current_normalized = current_description.strip() if current_description else ""
         new_normalized = new_description.strip()
         
-        # Double-check the interface matches before generating commands
+        # Skip update if current description is already "multiple devices on lldp"
+        # and new description is also indicating multiple devices
+        if (current_normalized == adapter.MULTIPLE_DEVICES_DESC and 
+            new_normalized == adapter.MULTIPLE_DEVICES_DESC):
+            if not cron_mode:
+                print("  -> No update needed (already marked as multiple devices)")
+            continue
+        
         if current_normalized != new_normalized:
-            # Verify interface exists in both datasets
             verification_desc = adapter.get_interface_description(interface)
             if verification_desc != current_description:
                 if not cron_mode:
@@ -246,37 +249,7 @@ def generate_description_commands(adapter, parsed_info, cron_mode=False):
     
     commands.append("end")
     return commands, updates_needed, actual_changes
-    commands = adapter.enter_config_mode()
-    updates_needed = False
-    actual_changes = []  # New list to track real changes
-    
-    if not cron_mode:
-        print("\nChecking current interface descriptions...")
-    for info in parsed_info:
-        current_description = adapter.get_interface_description(info['interface'])
-        new_description = info['system_name']
-        
-        if not cron_mode:
-            print(f"\nChecking {info['interface']}:")
-            print(f"  Current description: '{current_description}'")
-            print(f"  Proposed description: '{new_description}'")
-        
-        if current_description != new_description:
-            commands.extend(adapter.generate_interface_commands(info['interface'], new_description))
-            updates_needed = True
-            actual_changes.append({
-                'interface': info['interface'],
-                'old_description': current_description,
-                'new_description': new_description
-            })
-            if not cron_mode:
-                print("  -> Update needed")
-        elif not cron_mode:
-            print("  -> No update needed (descriptions match)")
-    
-    commands.append("end")
-    return commands, updates_needed, actual_changes  # Return the actual changes
-    
+
 def countdown_timer(seconds):
     print("\nReviewing changes before application...")
     for i in range(seconds, 0, -1):
@@ -343,10 +316,9 @@ def main():
                 print("\nNo description updates needed. All interfaces are already properly configured.")
             return
             
-        # Only print changes when there are actual updates
         if updates_needed:
             print(f"\nChanges detected on {args.node}:")
-            for change in actual_changes:  # Use the actual_changes list instead
+            for change in actual_changes:
                 print(f"Interface {change['interface']}:")
                 print(f"  Old description: '{change['old_description']}'")
                 print(f"  New description: '{change['new_description']}'")
