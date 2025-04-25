@@ -9,10 +9,24 @@ To establish a Layer 2 QinQ tunnel between the London site and the Liverpool sit
 *   **S-VLAN (Service Provider/Tunnel):** VLAN 602 (Assigned by JISC)
 *   **QinQ TPID (Tag Protocol Identifier):** 0x9100 (Required by JISC)
 
+## CRITICAL PREREQUISITE: Disabling Core Switch SVIs
 
-*   **ToR Switch:** Trunks the required internal C-VLANs (e.g., 10, 20, 30) to the Core. May hold the L3 SVIs for these VLANs (e.g., `interface Vlan10`, `interface Vlan20`).
-*   **Core Switch (RCP-SAP-CoreSR):** Acts solely as a Layer 2 QinQ mapper for this traffic path. **MUST NOT** have active L3 SVIs (`interface Vlan10`, `interface Vlan20`, etc.) for **any** C-VLAN being tunneled. Uses the special QinQ Access Port method on the ToR-facing interface.
-*   **ISP Link:** Configured as a QinQ trunk carrying the S-VLAN (602) with the specific TPID (0x9100).
+**This is the most crucial step for this configuration to function correctly.**
+
+The Core switch designated to perform the QinQ mapping **MUST NOT** have active Layer 3 Switched Virtual Interfaces (SVIs, e.g., `interface Vlan10`, `interface Vlan20`) for **ANY** of the C-VLANs that are being tunneled through the S-VLAN.
+
+**Why is this essential?**
+
+Leaving the SVIs active on the mapping Core switch creates a fundamental conflict:
+
+1.  **Routing vs. Bridging Conflict:** The active SVI tells the Core switch it is the Layer 3 gateway for that C-VLAN subnet. It will try to *route* traffic destined for that subnet locally and ARP for hosts within it. The QinQ configuration, however, tells the Core to blindly *bridge* (encapsulate) traffic for that C-VLAN into the S-VLAN tunnel when received on the designated QinQ port. The switch cannot logically do both for the same VLAN.
+2.  **Routing Failures:** When the Core needs to send traffic to a device in a tunneled C-VLAN at the *remote* site, its routing table will point to the local SVI. It will attempt local ARP resolution instead of sending the traffic into the L2 QinQ tunnel. This **will cause routing to the remote site for that VLAN to fail.**
+3.  **ARP Confusion:** The Core's ARP table may become unstable or contain incorrect entries as it gets confused between local ARP attempts via the SVI and potential responses coming back through the L2 tunnel.
+4.  **Unpredictable Behavior:** Control plane traffic (like routing protocol updates, CDP/LLDP for the C-VLAN) associated with the active SVI might be incorrectly injected into the tunnel or handled locally, leading to unpredictable network behavior.
+
+**Consequence:** Failure to disable the relevant SVIs on the mapping Core switch **will prevent Layer 3 communication** across the QinQ tunnel for those specific C-VLANs.
+
+**Action:** Before applying or activating the QinQ configuration, ensure all SVIs corresponding to the C-VLANs you intend to tunnel are either **deleted** or administratively **shut down** on the Core switches (London and Liverpool) acting as the QinQ mappers.
 
 ## Configuration Examples
 
@@ -51,7 +65,7 @@ interface vlan 602
 !
 ```
 
-*   **Port facing ToR Switch (e.g., Eth X - QinQ Ingress/Egress):** This uses the specific QinQ Access Port configuration. **This configuration does not need to list the C-VLANs.**
+*   **Port facing ToR Switch (e.g., Eth X - QinQ Ingress/Egress):** This uses the specific QinQ Access Port configuration.
 
 ```
 interface EthernetX // Connected to ToR Eth A (e.g., 1/1/35:1)
@@ -79,42 +93,57 @@ interface EthernetY // Connected to JISC (e.g., 1/1/27:1)
 !
 ```
 
-*   **CRITICAL Prerequisite:** Ensure the L3 interfaces for **ALL** C-VLANs being tunneled are **NOT active** on this Core switch.
+*   **Verification of SVI Status (Mandatory):** Ensure the L3 interfaces for **ALL** C-VLANs being tunneled are **NOT active**.
 
 ```
 ! On the Core Switch (RCP-SAP-CoreSR)
-! Ensure these interfaces do NOT exist or are shutdown for ALL C-VLANs in the tunnel (e.g., 10, 20, 30)
-! no interface Vlan10
-! no interface Vlan20
-! no interface Vlan30
-! ... etc ...
-! OR
-! interface Vlan10
-!   shutdown
-! interface Vlan20
-!   shutdown
-! interface Vlan30
-!   shutdown
-! ... etc ...
+! CONFIRM these interfaces do NOT exist or are shutdown for ALL C-VLANs in the tunnel (e.g., 10, 20, 30)
+
+! Option 1: Check they don't exist
+! show run | include interface Vlan10
+! show run | include interface Vlan20
+! show run | include interface Vlan30
+! ... etc ... (Should return nothing)
+
+! Option 2: Check they are shutdown
+! show ip interface brief | include Vlan10.*down
+! show ip interface brief | include Vlan20.*down
+! show ip interface brief | include Vlan30.*down
+! ... etc ... (Should show 'administratively down' or similar)
+
+! If necessary, configure:
+! config t
+!   no interface Vlan10
+!   no interface Vlan20
+!   no interface Vlan30
+!   ... etc ...
+!   OR
+!   interface Vlan10
+!     shutdown
+!   interface Vlan20
+!     shutdown
+!   interface Vlan30
+!     shutdown
+!   ... etc ...
+! end
+! write memory
 !
 ```
 
 ### 3. Liverpool Site Configuration
 
-The configuration on the Liverpool Core (CS-01) and its connected ToR switch would mirror the London setup precisely, using the same S-VLAN (602) and TPID (0x9100) on the ISP-facing link, and allowing the corresponding local C-VLANs (e.g., 10, 20, 30) on the ToR-Core trunk. The Liverpool Core must also have the SVIs for these C-VLANs disabled.
+The configuration on the Liverpool Core (CS-01) and its connected ToR switch would mirror the London setup precisely, using the same S-VLAN (602) and TPID (0x9100) on the ISP-facing link, and allowing the corresponding local C-VLANs (e.g., 10, 20, 30) on the ToR-Core trunk. The Liverpool Core must also have the SVIs for these C-VLANs disabled as per the **CRITICAL PREREQUISITE**.
 
 ## Explanation of Key Concepts
 
-1.  **Core as L2 Mapper:** By removing/disabling the L3 SVIs (e.g., `interface Vlan10`, `Vlan20`...) on the Core for all tunneled C-VLANs, we dedicate it to Layer 2 functions for this traffic path.
+1.  **Core as L2 Mapper:** By removing/disabling the relevant L3 SVIs, the Core is dedicated to Layer 2 QinQ mapping for this path.
 2.  **ToR-Core Link (QinQ Access Port Method):**
-    *   The ToR sends standard 802.1Q tagged frames (C-Tags 10, 20, 30...) over its trunk port (Eth A).
-    *   The Core receives these tagged frames on its port Eth X.
-    *   Because Eth X is configured as `switchport mode access`, `switchport access vlan 602`, *and* `interface Vlan 602` is marked `vlan-stack`, the switch applies special QinQ logic:
-        *   **Ingress (ToR -> Core):** It accepts the incoming tagged frames (normally dropped by an access port), treats the *entire frame* (including the C-Tag) as payload, and associates it internally with S-VLAN 602. **This inherently handles multiple different C-VLAN tags transparently.**
-        *   **Egress (Core -> ToR):** When traffic arrives from the ISP in S-VLAN 602 destined for Eth X, the Core removes the outer S-Tag (VLAN 602) and forwards the original inner frame (still tagged with its original C-VLAN) out Eth X towards the ToR.
-    *   This `trunk -> access` setup **is valid and standard** for this specific QinQ ingress/egress method and works for multiple C-VLANs without listing them on the Core's access port configuration.
+    *   The ToR sends standard tagged C-VLAN frames.
+    *   The Core receives these on the specially configured `access` port (Eth X) mapped to the `vlan-stack` enabled S-VLAN (602).
+    *   This port automatically encapsulates various incoming C-VLAN tagged frames into S-VLAN 602 (preserving the C-Tag) and decapsulates traffic coming from S-VLAN 602 (stripping the S-Tag) before sending towards the ToR.
+    *   This `trunk -> access` setup is standard for this QinQ method.
 3.  **Core-ISP Link (QinQ Trunk):**
-    *   Standard QinQ trunk carrying only the S-VLAN (602), using the ISP's TPID (0x9100), and with an increased MTU.
+    *   Standard QinQ trunk using the ISP's TPID (0x9100), carrying only S-VLAN 602, with increased MTU.
 
 ## Traffic Flow Summary
 
@@ -124,9 +153,9 @@ The configuration on the Liverpool Core (CS-01) and its connected ToR switch wou
     3.  Leaves London Core Eth Y with Outer Tag S-VLAN 602 (TPID 0x9100) + Inner Tag C-VLAN 10.
     4.  Traverses JISC network.
     5.  Arrives Liverpool Core ISP Port -> S-Tag 602 processed.
-    6.  Leaves Liverpool Core ToR-facing Port (configured like London Eth X) -> S-Tag 602 stripped.
+    6.  Leaves Liverpool Core ToR-facing Port -> S-Tag 602 stripped.
     7.  Arrives Liverpool ToR Trunk Port as Frame (C-Tag 10).
-*   The same flow applies concurrently for frames tagged with C-VLAN 20, 30, etc.
+*   The same flow applies concurrently for frames tagged with other tunneled C-VLANs (20, 30, etc.).
 *   **Liverpool ToR -> London ToR:** Reverse of the above.
 
-This updated configuration should reflect your requirement to tunnel multiple production VLANs using this method and the corrected Mermaid syntax should render properly in compatible Markdown viewers (like GitHub).
+This configuration should reflect your requirement to tunnel multiple production VLANs using this method. Remember that disabling the corresponding SVIs on the Core switches acting as mappers is absolutely mandatory for successful L3 communication over the tunnel.
