@@ -9,20 +9,6 @@ To establish a Layer 2 QinQ tunnel between the London site and the Liverpool sit
 *   **S-VLAN (Service Provider/Tunnel):** VLAN 602 (Assigned by JISC)
 *   **QinQ TPID (Tag Protocol Identifier):** 0x9100 (Required by JISC)
 
-## Topology (Focus on London Side)
-
-```mermaid
-graph LR
-    subgraph London Site
-        ToR[London ToR Switch] -- Eth A (Trunk C-VLANs 10,20,30...) --> CoreSR["London Core (RCP-SAP-CoreSR)<br>Role: QinQ Mapper"]
-        CoreSR -- Eth X (QinQ Access Port / S-VLAN 602) --- CoreSR -- Eth Y (QinQ Trunk S-VLAN 602 / TPID 9100) --> ISP[(JISC Network)]
-        ToR -- Access Ports --> EndDevices["Servers/PCs in various<br>C-VLANs (10, 20, 30...)"]
-    end
-
-    ISP <-- S-VLAN 602 Tunnel --> Liverpool["Liverpool Site (Analogous Config)"]
-
-    style CoreSR fill:#f9f,stroke:#333,stroke-width:2px
-```
 
 *   **ToR Switch:** Trunks the required internal C-VLANs (e.g., 10, 20, 30) to the Core. May hold the L3 SVIs for these VLANs (e.g., `interface Vlan10`, `interface Vlan20`).
 *   **Core Switch (RCP-SAP-CoreSR):** Acts solely as a Layer 2 QinQ mapper for this traffic path. **MUST NOT** have active L3 SVIs (`interface Vlan10`, `interface Vlan20`, etc.) for **any** C-VLAN being tunneled. Uses the special QinQ Access Port method on the ToR-facing interface.
