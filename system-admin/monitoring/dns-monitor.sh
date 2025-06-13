@@ -30,10 +30,34 @@ OUTPUT_FILE="dns_performance.json"
 TEMP_FILE="/tmp/dns_test_current.tmp"
 LAST_RESULTS_FILE="/tmp/dns_last_results.tmp"
 
+# Function to check and truncate JSON file if it exceeds 10MB
+check_and_truncate_json() {
+    if [ -f "$OUTPUT_FILE" ]; then
+        local file_size=$(stat -c%s "$OUTPUT_FILE" 2>/dev/null || stat -f%z "$OUTPUT_FILE" 2>/dev/null || echo 0)
+        local max_size=$((10 * 1024 * 1024))  # 10MB in bytes
+        
+        if [ "$file_size" -gt "$max_size" ]; then
+            echo "JSON file exceeded 10MB ($file_size bytes), truncating..."
+            
+            # Keep only the last 1000 entries
+            if command -v jq &> /dev/null; then
+                jq '.tests = (.tests | .[-1000:])' "$OUTPUT_FILE" > "${OUTPUT_FILE}.tmp" && mv "${OUTPUT_FILE}.tmp" "$OUTPUT_FILE"
+            else
+                # Fallback: create new file with header
+                echo '{"tests": []}' > "$OUTPUT_FILE"
+            fi
+            echo "File truncated to keep last 1000 entries."
+        fi
+    fi
+}
+
 # Initialize JSON file if it doesn't exist
 if [ ! -f "$OUTPUT_FILE" ]; then
     echo '{"tests": []}' > "$OUTPUT_FILE"
 fi
+
+# Check file size on startup
+check_and_truncate_json
 
 # Function to generate random subdomain for cache busting
 generate_random_subdomain() {
@@ -66,16 +90,21 @@ measure_dns_lookup() {
     fi
 }
 
-# Function to calculate average from all historical data
-calculate_average() {
+# Function to calculate average from all historical data and return count
+calculate_average_and_count() {
     local server=$1
     local count=0
     local sum=0
     
     # Use jq if available for better performance
     if command -v jq &> /dev/null && [ -f "$OUTPUT_FILE" ]; then
-        local result=$(jq -r ".tests[] | select(.server==\"$server\" and .response_time != -1) | .response_time" "$OUTPUT_FILE" 2>/dev/null | awk '{sum+=$1; count++} END {if (count>0) printf "%.2f", sum/count; else print "N/A"}')
-        echo "$result"
+        local values=$(jq -r ".tests[] | select(.server==\"$server\" and .response_time != -1) | .response_time" "$OUTPUT_FILE" 2>/dev/null)
+        if [ -n "$values" ]; then
+            local result=$(echo "$values" | awk '{sum+=$1; count++} END {if (count>0) printf "%.2f|%d", sum/count, count; else print "N/A|0"}')
+            echo "$result"
+        else
+            echo "N/A|0"
+        fi
     else
         # Fallback: parse JSON manually
         if [ -f "$OUTPUT_FILE" ]; then
@@ -100,11 +129,18 @@ calculate_average() {
         fi
         
         if [ $count -eq 0 ]; then
-            echo "N/A"
+            echo "N/A|0"
         else
-            echo "scale=2; $sum / $count" | bc
+            local avg=$(echo "scale=2; $sum / $count" | bc)
+            echo "$avg|$count"
         fi
     fi
+}
+
+# Function to calculate average from all historical data (backwards compatibility)
+calculate_average() {
+    local result=$(calculate_average_and_count "$1")
+    echo "${result%|*}"
 }
 
 # Function to get last result for a server
@@ -139,12 +175,17 @@ display_status() {
     echo "Last update: $(date)"
     echo ""
     echo "Response Times (ms):"
-    echo "Server               | Last Run     | Average      | Diff"
-    echo "---------------------------------------------------------"
+    echo "Server                        | Last Run     | Average      | Diff"
+    echo "---------------------------------------------------------------------"
     
     for server in "${DNS_SERVERS[@]}"; do
         local last=$(get_last_result "$server")
-        local avg=$(calculate_average "$server")
+        local avg_and_count=$(calculate_average_and_count "$server")
+        local avg="${avg_and_count%|*}"
+        local count="${avg_and_count#*|}"
+        
+        # Format server name with sample count
+        local server_display="$server ($count)"
         
         # Calculate difference if both values exist
         local diff="N/A"
@@ -156,7 +197,7 @@ display_status() {
             fi
         fi
         
-        printf "%-20s | %-9s ms | %-9s ms | %s ms\n" "$server" "$last" "$avg" "$diff"
+        printf "%-29s | %-9s ms | %-9s ms | %s ms\n" "$server_display" "$last" "$avg" "$diff"
     done
     
     echo ""
@@ -213,6 +254,11 @@ EOF
                 sed -i '$ s/]$/,/' "$OUTPUT_FILE" 2>/dev/null || sed -i '' '$ s/]$/,/' "$OUTPUT_FILE"
                 echo "$json_entry]}" >> "$OUTPUT_FILE"
                 sed -i 's/,\]/]/' "$OUTPUT_FILE" 2>/dev/null || sed -i '' 's/,\]/]/' "$OUTPUT_FILE"
+            fi
+            
+            # Check file size periodically (every 100 entries)
+            if (( $(date +%s) % 100 == 0 )); then
+                check_and_truncate_json
             fi
         done
     done
